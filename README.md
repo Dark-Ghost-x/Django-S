@@ -4,5 +4,4 @@
 
 ``git clone https://github.com/Dark-Ghost-x/Django-S
 cd Django-S
-
 python3 Django-exp``
